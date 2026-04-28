@@ -1,20 +1,27 @@
-# Step 1: Use a reliable Maven image with Java 17 to build the application
+# Stage 1: Build the application
 FROM maven:3.8.5-eclipse-temurin-17 AS build
 
-# Copy your source code and pom.xml into the container
-COPY . .
+# Create a safe working directory inside the container
+WORKDIR /app
 
-# Run the Maven build to create the executable JAR file
+# Copy only the necessary build files first
+COPY pom.xml .
+COPY src ./src
+
+# Build the project
 RUN mvn clean package -DskipTests
 
-# Step 2: Use a lightweight Java Runtime Environment (JRE) to run the app
+# Stage 2: Run the application
 FROM eclipse-temurin:17-jre-focal
 
-# Copy the generated JAR file from the build stage to the final image
-COPY --from=build /target/*.jar app.jar
+# Create the final working directory
+WORKDIR /app
 
-# Tell Render to listen on port 8080
+# Copy the built JAR file from the 'build' stage into this new stage
+COPY --from=build /app/target/*.jar app.jar
+
+# Expose the standard Spring Boot port
 EXPOSE 8080
 
-# The command to start your Spring Boot application
+# Start the application
 ENTRYPOINT ["java", "-jar", "app.jar"]
