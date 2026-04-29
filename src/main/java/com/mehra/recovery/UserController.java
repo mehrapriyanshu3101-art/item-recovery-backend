@@ -1,9 +1,10 @@
 package com.mehra.recovery;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender; // <-- FIXED IMPORT
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -20,16 +21,18 @@ public class UserController {
     @Autowired
     private JavaMailSender mailSender;
 
+    // Reads spring.mail.username from application.properties automatically
+    @Value("${spring.mail.username}")
+    private String senderEmail;
+
     /**
      * 1. REGISTRATION (Used by Android App)
      * Creates a user and returns a unique 8-character token for the QR code.
      */
     @PostMapping("/register")
     public ResponseEntity<String> registerUser(@RequestBody User user) {
-        // Generate unique token for the QR code
         String token = UUID.randomUUID().toString().substring(0, 8);
         user.setUniqueToken(token);
-
         userRepository.save(user);
         return ResponseEntity.ok(token);
     }
@@ -52,24 +55,28 @@ public class UserController {
      */
     @PostMapping("/send-email")
     public ResponseEntity<String> sendRecoveryEmail(@RequestBody Map<String, String> payload) {
-        String token = payload.get("id");
+        String token         = payload.get("id");
         String finderMessage = payload.get("message");
 
-        // Dynamically find the user in the database via the token
         return userRepository.findByUniqueToken(token).map(owner -> {
             try {
                 SimpleMailMessage email = new SimpleMailMessage();
-                email.setTo(owner.getEmail()); // Dynamic: Sends to the specific owner
+                email.setFrom(senderEmail);          // FIX: required by Gmail SMTP
+                email.setTo(owner.getEmail());
                 email.setSubject("Item Found! A message from the finder");
-                email.setText("Hello " + owner.getName() + ",\n\n" +
-                        "Good news! Someone found your lost item and sent you a message:\n\n" +
-                        "\"" + finderMessage + "\"\n\n" +
-                        "Please reply to this message if the finder included their contact info.");
+                email.setText(
+                    "Hello " + owner.getName() + ",\n\n" +
+                    "Good news! Someone found your lost item and sent you a message:\n\n" +
+                    "\"" + finderMessage + "\"\n\n" +
+                    "Please reply to this message if the finder included their contact info."
+                );
 
                 mailSender.send(email);
                 return ResponseEntity.ok("Email sent successfully to " + owner.getName());
+
             } catch (Exception e) {
-                return ResponseEntity.status(500).body("Error sending email: " + e.getMessage());
+                return ResponseEntity.status(500)
+                        .body("Error sending email: " + e.getMessage());
             }
         }).orElse(ResponseEntity.status(404).body("Token not recognized."));
     }
