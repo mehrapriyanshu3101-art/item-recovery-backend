@@ -5,65 +5,121 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Item Recovery Portal</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f4f7f6; }
-        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 90%; }
-        h1 { color: #2d3436; margin-bottom: 10px; }
-        p { color: #636e72; }
-        .owner-info { margin-top: 20px; padding: 15px; background: #e1f5fe; border-radius: 8px; display: none; }
-        .btn { display: inline-block; margin-top: 15px; padding: 10px 20px; background: #00cec9; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f4f7f6; }
+        .card { background: white; padding: 2.5rem; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); text-align: center; max-width: 450px; width: 90%; }
+        h1 { color: #2d3436; margin-bottom: 5px; font-size: 1.8rem; }
+        p { color: #636e72; line-height: 1.6; }
+        .owner-display { margin: 20px 0; padding: 15px; background: #e1f5fe; border-radius: 10px; display: none; border-left: 5px solid #00cec9; }
+        .owner-display b { color: #0984e3; font-size: 1.2rem; }
+        
+        label { display: block; text-align: left; font-weight: 600; margin-top: 20px; color: #2d3436; margin-bottom: 8px; }
+        textarea { width: 100%; border: 2px solid #dfe6e9; border-radius: 10px; padding: 12px; font-family: inherit; resize: none; box-sizing: border-box; transition: border-color 0.3s; }
+        textarea:focus { border-color: #00cec9; outline: none; }
+        
+        .btn { display: block; margin-top: 20px; padding: 15px; background: #00cec9; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 1rem; cursor: pointer; transition: all 0.3s; width: 100%; }
+        .btn:hover { background: #00b0ad; transform: translateY(-2px); }
+        .btn:disabled { background: #b2bec3; cursor: not-allowed; transform: none; }
+
+        #status-area { margin-top: 15px; font-weight: 600; }
+        .loading-text { color: #0984e3; }
+        .success-text { color: #2ecc71; }
+        .error-text { color: #e74c3c; }
     </style>
 </head>
 <body>
 
 <div class="card">
     <h1>Item Found!</h1>
-    <p>You have scanned a recovery tag for a lost item.</p>
+    <p>Help return this item by sending a secure message to the owner.</p>
     
-    <div id="loading">Searching for owner details...</div>
+    <div id="status-area" class="loading-text">Connecting to secure server...</div>
 
-    <div id="owner-info" class="owner-info">
-        <p>This item belongs to:</p>
-        <h2 id="owner-name">Loading...</h2>
-        <p>Please contact them at:</p>
-        <strong id="owner-email"></strong>
-        <br>
-        <a href="#" id="contact-btn" class="btn">Send Message</a>
-    </div>
+    <div id="main-ui" style="display: none;">
+        <div id="owner-box" class="owner-display">
+            This item belongs to: <br><b id="owner-name"></b>
+        </div>
 
-    <div id="error-msg" style="display:none; color: red; margin-top: 20px;">
-        Sorry, we couldn't find any owner record for this tag.
+        <label for="finder-msg">Where is the item?</label>
+        <textarea id="finder-msg" rows="4" placeholder="e.g., I found your wallet at the library near the coffee shop. I've left it with the security guard."></textarea>
+        
+        <button id="send-btn" class="btn">Send Secure Message</button>
     </div>
 </div>
 
 <script>
-    // 1. Get the 'id' from the URL (e.g., index.html?id=abcdef)
+    // 1. Configuration
     const urlParams = new URLSearchParams(window.location.search);
-    const userToken = urlParams.get('id');
+    const token = urlParams.get('id'); // The unique token from the QR code
+    const API_BASE = "https://item-recovery-backend.onrender.com/api/users/";
 
-    // 2. Point to your Spring Boot Backend
-    // REPLACE 'YOUR_IP' with your laptop's actual IP address (e.g., 192.168.1.5)
-    const API_BASE_URL = "http://YOUR_IP:8080/api/users/find/";
+    const statusEl = document.getElementById('status-area');
+    const mainUi = document.getElementById('main-ui');
+    const ownerBox = document.getElementById('owner-box');
+    const nameEl = document.getElementById('owner-name');
+    const sendBtn = document.getElementById('send-btn');
+    const msgInput = document.getElementById('finder-msg');
 
-    if (userToken) {
-        fetch(API_BASE_URL + userToken)
-            .then(response => {
-                if (!response.ok) throw new Error('Not found');
-                return response.json();
+    // 2. Initial Step: Verify the token and show owner name
+    if (!token) {
+        statusEl.innerText = "Error: Invalid QR Code (No ID found).";
+        statusEl.className = "error-text";
+    } else {
+        fetch(`${API_BASE}find/${token}`)
+            .then(res => {
+                if (!res.ok) throw new Error("Invalid Token");
+                return res.json();
             })
             .then(user => {
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('owner-info').style.display = 'block';
-                document.getElementById('owner-name').innerText = user.name;
-                document.getElementById('owner-email').innerText = user.email;
-                document.getElementById('contact-btn').href = "mailto:" + user.email + "?subject=I found your lost item!";
+                statusEl.style.display = 'none';
+                mainUi.style.display = 'block';
+                ownerBox.style.display = 'block';
+                nameEl.innerText = user.name; // Displaying owner name from DB
             })
             .catch(err => {
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('error-msg').style.display = 'block';
+                statusEl.innerText = "Error: This recovery tag is not registered.";
+                statusEl.className = "error-text";
             });
-    } else {
-        document.getElementById('loading').innerText = "Invalid QR Code - No ID provided.";
     }
+
+    // 3. Final Step: Send the message directly to the owner via Backend
+    sendBtn.onclick = function() {
+        const message = msgInput.value.trim();
+        
+        if (!message) {
+            alert("Please type a message for the owner.");
+            return;
+        }
+
+        // Disable UI during sending
+        sendBtn.disabled = true;
+        sendBtn.innerText = "Sending Message...";
+
+        fetch(`${API_BASE}send-email`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                id: token,        // Token used by backend to find owner email
+                message: message  // Finder's custom note
+            })
+        })
+        .then(res => {
+            if (res.ok) {
+                mainUi.innerHTML = `
+                    <div class="success-text" style="font-size: 1.2rem; margin-top: 20px;">
+                        ✔ Message Sent Successfully!
+                    </div>
+                    <p style="margin-top: 15px;">The owner has been notified via their registered email. Thank you for your kindness!</p>
+                `;
+            } else {
+                throw new Error("Server error");
+            }
+        })
+        .catch(err => {
+            alert("Could not send email. The server might be down. Please try again later.");
+            sendBtn.disabled = false;
+            sendBtn.innerText = "Send Secure Message";
+        });
+    };
 </script>
 
 </body>
