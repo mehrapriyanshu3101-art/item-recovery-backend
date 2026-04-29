@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Item Recovery Portal</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f4f7f6; }
+        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 90%; }
+        h1 { color: #2d3436; margin-bottom: 10px; }
+        p { color: #636e72; }
+        .owner-info { margin-top: 20px; padding: 15px; background: #e1f5fe; border-radius: 8px; display: none; }
+        .btn { display: inline-block; margin-top: 15px; padding: 10px 20px; background: #00cec9; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h1>Item Found!</h1>
+    <p>You have scanned a recovery tag for a lost item.</p>
+    
+    <div id="loading">Searching for owner details...</div>
+
+    <div id="owner-info" class="owner-info">
+        <p>This item belongs to:</p>
+        <h2 id="owner-name">Loading...</h2>
+        <p>Please contact them at:</p>
+        <strong id="owner-email"></strong>
+        <br>
+        <a href="#" id="contact-btn" class="btn">Send Message</a>
+    </div>
+
+    <div id="error-msg" style="display:none; color: red; margin-top: 20px;">
+        Sorry, we couldn't find any owner record for this tag.
+    </div>
+</div>
+
+<script>
+    // 1. Get the 'id' from the URL (e.g., index.html?id=abcdef)
+    const urlParams = new URLSearchParams(window.location.search);
+    const userToken = urlParams.get('id');
+
+    // 2. Point to your Spring Boot Backend
+    // REPLACE 'YOUR_IP' with your laptop's actual IP address (e.g., 192.168.1.5)
+    const API_BASE_URL = "http://YOUR_IP:8080/api/users/find/";
+
+    if (userToken) {
+        fetch(API_BASE_URL + userToken)
+            .then(response => {
+                if (!response.ok) throw new Error('Not found');
+                return response.json();
+            })
+            .then(user => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('owner-info').style.display = 'block';
+                document.getElementById('owner-name').innerText = user.name;
+                document.getElementById('owner-email').innerText = user.email;
+                document.getElementById('contact-btn').href = "mailto:" + user.email + "?subject=I found your lost item!";
+            })
+            .catch(err => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error-msg').style.display = 'block';
+            });
+    } else {
+        document.getElementById('loading').innerText = "Invalid QR Code - No ID provided.";
+    }
+</script>
+
+</body>
+</html>
