@@ -11,7 +11,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/users")
-@CrossOrigin(origins = "*") 
+@CrossOrigin(origins = "*")
 public class UserController {
 
     @Autowired
@@ -29,7 +29,7 @@ public class UserController {
         // Generate unique token for the QR code
         String token = UUID.randomUUID().toString().substring(0, 8);
         user.setUniqueToken(token);
-        
+
         userRepository.save(user);
         return ResponseEntity.ok(token);
     }
