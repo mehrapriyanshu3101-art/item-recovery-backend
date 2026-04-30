@@ -1,4 +1,4 @@
-package com.mehra.recovery;
+package com.mehra.foundit;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
