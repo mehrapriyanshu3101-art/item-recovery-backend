@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>foundit - Item Recovery Portal</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f4f7f6;
+        }
+        .card {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 450px;
+            width: 90%;
+        }
+        h1 { color: #2d3436; margin-bottom: 5px; font-size: 1.8rem; }
+        p  { color: #636e72; line-height: 1.6; }
+
+        .owner-display {
+            margin: 20px 0;
+            padding: 15px;
+            background: #e1f5fe;
+            border-radius: 10px;
+            display: none;
+            border-left: 5px solid #00cec9;
+        }
+        .owner-display b { color: #0984e3; font-size: 1.2rem; }
+
+        label {
+            display: block;
+            text-align: left;
+            font-weight: 600;
+            margin-top: 20px;
+            color: #2d3436;
+            margin-bottom: 8px;
+        }
+        textarea {
+            width: 100%;
+            border: 2px solid #dfe6e9;
+            border-radius: 10px;
+            padding: 12px;
+            font-family: inherit;
+            resize: none;
+            box-sizing: border-box;
+            transition: border-color 0.3s;
+        }
+        textarea:focus { border-color: #00cec9; outline: none; }
+
+        .btn {
+            display: block;
+            margin-top: 20px;
+            padding: 15px;
+            background: #00cec9;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+        }
+        .btn:hover    { background: #00b0ad; transform: translateY(-2px); }
+        .btn:disabled { background: #b2bec3; cursor: not-allowed; transform: none; }
+
+        #status-area   { margin-top: 15px; font-weight: 600; }
+        .loading-text  { color: #0984e3; }
+        .success-text  { color: #2ecc71; }
+        .error-text    { color: #e74c3c; }
+
+        /* Timeout warning banner */
+        .warning-banner {
+            display: none;
+            margin-top: 12px;
+            padding: 10px 14px;
+            background: #fff3cd;
+            border-left: 4px solid #f0ad4e;
+            border-radius: 8px;
+            color: #856404;
+            font-size: 0.88rem;
+            text-align: left;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h1>foundit - Item Found!</h1>
+    <p>Help return this item by sending a secure message to the owner.</p>
+
+    <div id="status-area" class="loading-text">Connecting to secure server...</div>
+
+    <div id="main-ui" style="display: none;">
+        <div id="owner-box" class="owner-display">
+            This item belongs to: <br><b id="owner-name"></b>
+        </div>
+
+        <label for="finder-msg">Where is the item?</label>
+        <textarea id="finder-msg" rows="4"
+            placeholder="e.g., I found your wallet at the library near the coffee shop. I've left it with the security guard.">
+        </textarea>
+
+        <button id="send-btn" class="btn">Send Secure Message</button>
+
+        <!-- Shown after ~8 seconds if still waiting -->
+        <div id="warning-banner" class="warning-banner">
+            ⏳ The server is waking up from sleep (this can take up to 60 seconds on the free tier).
+            Please wait or try again shortly.
+        </div>
+    </div>
+</div>
+
+<script>
+    // ── Configuration ────────────────────────────────────────────────────────
+    const urlParams = new URLSearchParams(window.location.search);
+    const token     = urlParams.get('id');
+    const API_BASE  = "https://item-recovery-backend.onrender.com/api/users/";
+
+    const statusEl    = document.getElementById('status-area');
+    const mainUi      = document.getElementById('main-ui');
+    const ownerBox    = document.getElementById('owner-box');
+    const nameEl      = document.getElementById('owner-name');
+    const sendBtn     = document.getElementById('send-btn');
+    const msgInput    = document.getElementById('finder-msg');
+    const warnBanner  = document.getElementById('warning-banner');
+
+    // ── Helper: fetch with timeout ───────────────────────────────────────────
+    function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
+        const controller  = new AbortController();
+        const timeoutId   = setTimeout(() => controller.abort(), timeoutMs);
+        return fetch(url, { ...options, signal: controller.signal })
+            .finally(() => clearTimeout(timeoutId));
+    }
+
+    // ── Step 1: Verify token on page load ────────────────────────────────────
+    if (!token) {
+        statusEl.innerText    = "Error: Invalid QR Code (No ID found).";
+        statusEl.className    = "error-text";
+    } else {
+        fetchWithTimeout(`${API_BASE}find/${token}`, {}, 20000)
+            .then(res => {
+                if (!res.ok) throw new Error("Invalid Token");
+                return res.json();
+            })
+            .then(user => {
+                statusEl.style.display  = 'none';
+                mainUi.style.display    = 'block';
+                ownerBox.style.display  = 'block';
+                nameEl.innerText        = user.name;
+            })
+            .catch(err => {
+                if (err.name === 'AbortError') {
+                    statusEl.innerText  = "Server is taking too long to respond. It may be waking up — please refresh the page in 30 seconds.";
+                } else {
+                    statusEl.innerText  = "Error: This recovery tag is not registered.";
+                }
+                statusEl.className = "error-text";
+            });
+    }
+
+    // ── Step 2: Send email on button click ───────────────────────────────────
+    sendBtn.onclick = async function () {
+        const message = msgInput.value.trim();
+        if (!message) {
+            alert("Please type a message for the owner.");
+            return;
+        }
+
+        sendBtn.disabled    = true;
+        sendBtn.innerText   = "Sending Message...";
+        warnBanner.style.display = 'none';
+
+        // Show "server waking up" banner after 8 seconds if still waiting
+        const warnTimer = setTimeout(() => {
+            warnBanner.style.display = 'block';
+        }, 8000);
+
+        try {
+            // 60-second timeout — enough for Render cold-start
+            const res = await fetchWithTimeout(
+                `${API_BASE}send-email`,
+                {
+                    method:  "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body:    JSON.stringify({ id: token, message: message })
+                },
+                60000
+            );
+
+            clearTimeout(warnTimer);
+            warnBanner.style.display = 'none';
+
+            if (res.ok) {
+                mainUi.innerHTML = `
+                    <div class="success-text" style="font-size:1.2rem; margin-top:20px;">
+                        ✔ Message Sent Successfully!
+                    </div>
+                    <p style="margin-top:15px;">
+                        The owner has been notified via their registered email.
+                        Thank you for your kindness!
+                    </p>`;
+            } else {
+                const errText = await res.text();
+                alert("Server error: " + errText);
+                sendBtn.disabled  = false;
+                sendBtn.innerText = "Send Secure Message";
+            }
+
+        } catch (err) {
+            clearTimeout(warnTimer);
+            warnBanner.style.display = 'none';
+
+            if (err.name === 'AbortError') {
+                alert("Request timed out. The server is still waking up — please try again in 30 seconds.");
+            } else {
+                alert("Could not send the message. Please check your connection and try again.");
+            }
+            sendBtn.disabled  = false;
+            sendBtn.innerText = "Send Secure Message";
+        }
+    };
+</script>
+
+</body>
+</html>
