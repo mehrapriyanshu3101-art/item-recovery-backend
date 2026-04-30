@@ -124,8 +124,25 @@
 <script>
     // ── Configuration ────────────────────────────────────────────────────────
     const urlParams = new URLSearchParams(window.location.search);
-    const token     = urlParams.get('id');
-    const API_BASE  = "https://item-recovery-backend.onrender.com/api/users/";
+    const queryToken = (
+        urlParams.get('id') ||
+        urlParams.get('token') ||
+        urlParams.get('uid') ||
+        urlParams.get('t') ||
+        ""
+    ).trim();
+
+    // Supports QR links like:
+    // - /?id=abc12345
+    // - /?token=abc12345
+    // - /abc12345
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const pathToken = pathParts.length > 0 ? pathParts[pathParts.length - 1] : "";
+    const rawToken = queryToken || (pathToken !== "index.html" ? pathToken : "");
+    const token = decodeURIComponent(rawToken).trim();
+
+    // Prefer same-origin API so this works across preview/prod URLs.
+    const API_BASE  = `${window.location.origin}/api/users/`;
 
     const statusEl    = document.getElementById('status-area');
     const mainUi      = document.getElementById('main-ui');
@@ -145,7 +162,7 @@
 
     // ── Step 1: Verify token on page load ────────────────────────────────────
     if (!token) {
-        statusEl.innerText    = "Error: Invalid QR Code (No ID found).";
+        statusEl.innerText    = "Error: Invalid QR Code (No token found).";
         statusEl.className    = "error-text";
     } else {
         fetchWithTimeout(`${API_BASE}find/${token}`, {}, 20000)
