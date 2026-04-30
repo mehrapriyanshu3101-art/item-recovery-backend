@@ -126,6 +126,7 @@
     const urlParams = new URLSearchParams(window.location.search);
     const queryToken = (
         urlParams.get('id') ||
+        urlParams.get('owner') ||
         urlParams.get('token') ||
         urlParams.get('uid') ||
         urlParams.get('t') ||
