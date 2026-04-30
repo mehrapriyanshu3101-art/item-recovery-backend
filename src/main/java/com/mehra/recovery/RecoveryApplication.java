@@ -1,4 +1,4 @@
-package com.mehra.recovery;
+package com.mehra.foundit;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
