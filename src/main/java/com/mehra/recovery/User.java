@@ -1,4 +1,4 @@
-package com.mehra.recovery;
+package com.mehra.foundit;
 
 import jakarta.persistence.*;
 
