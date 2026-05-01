@@ -3,12 +3,14 @@ package com.mehra.foundit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
-import org.springframework.mail.MailAuthenticationException;
-import org.springframework.mail.MailSendException;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 
@@ -20,11 +22,12 @@ public class UserController {
     @Autowired
     private UserRepository userRepository;
 
-    @Autowired
-    private JavaMailSender mailSender;
+    // Resend API key from environment variable
+    @Value("${RESEND_API_KEY:}")
+    private String resendApiKey;
 
-    // Reads spring.mail.username from application.properties automatically
-    @Value("${spring.mail.username}")
+    // Verified sender identity in Resend, e.g. no-reply@yourdomain.com
+    @Value("${MAIL_FROM:}")
     private String senderEmail;
 
     /**
@@ -71,18 +74,20 @@ public class UserController {
                 return ResponseEntity.status(500).body("Owner email is not configured.");
             }
             try {
-                SimpleMailMessage email = new SimpleMailMessage();
-                email.setFrom(senderEmail);          // required by Gmail SMTP
-                email.setTo(owner.getEmail());
-                email.setSubject("Item Found! A message from the finder");
-                email.setText(
+                if (resendApiKey == null || resendApiKey.isBlank()) {
+                    return ResponseEntity.status(500).body("Missing RESEND_API_KEY on server.");
+                }
+                if (senderEmail == null || senderEmail.isBlank()) {
+                    return ResponseEntity.status(500).body("Missing MAIL_FROM on server.");
+                }
+
+                String mailText =
                         "Hello " + owner.getName() + ",\n\n" +
                                 "Good news! Someone found your lost item and sent you a message:\n\n" +
                                 "\"" + finderMessage + "\"\n\n" +
-                                "Please reply to this message if the finder included their contact info."
-                );
+                                "Please reply to this message if the finder included their contact info.";
 
-                mailSender.send(email);
+                sendViaResend(owner.getEmail(), "Item Found! A message from the finder", mailText);
                 return ResponseEntity.ok("Email sent successfully to " + owner.getName());
 
             } catch (Exception e) {
@@ -95,25 +100,54 @@ public class UserController {
     private String buildMailErrorMessage(Exception e) {
         String rootMessage = findRootCauseMessage(e).toLowerCase();
 
-        if (e instanceof MailAuthenticationException || rootMessage.contains("auth") || rootMessage.contains("username and password not accepted")) {
-            return "Email auth failed: MAIL_USERNAME / MAIL_PASSWORD is invalid, revoked, or not an App Password.";
+        if (rootMessage.contains("401") || rootMessage.contains("unauthorized")) {
+            return "Resend authentication failed. RESEND_API_KEY is invalid or revoked.";
         }
-        if (rootMessage.contains("535-5.7.8")) {
-            return "Gmail rejected login (535-5.7.8). Use a valid Gmail App Password (16 chars, no spaces).";
+        if (rootMessage.contains("403") || rootMessage.contains("forbidden")) {
+            return "Resend rejected sender. MAIL_FROM must be a verified sender/domain in Resend.";
         }
-        if (rootMessage.contains("timed out") || rootMessage.contains("timeout") || rootMessage.contains("could not connect to smtp host")) {
-            return "SMTP connection timed out. Render could not reach Gmail SMTP or the connection is blocked.";
+        if (rootMessage.contains("422")) {
+            return "Resend validation failed. Check recipient email and MAIL_FROM format.";
         }
-        if (rootMessage.contains("from address failed") || rootMessage.contains("sender address rejected")) {
-            return "Sender rejected by SMTP. MAIL_USERNAME must match the Gmail account used to generate the App Password.";
-        }
-        if (rootMessage.contains("recipient address rejected") || rootMessage.contains("invalid addresses")) {
-            return "Recipient email was rejected by SMTP. Check owner's email format in database.";
-        }
-        if (e instanceof MailSendException) {
-            return "SMTP send failed. Check Gmail account security settings and SMTP access on the server.";
+        if (rootMessage.contains("timed out") || rootMessage.contains("timeout")) {
+            return "Email API timed out. Please retry in a few seconds.";
         }
         return "Email send failed: " + sanitize(rootMessage);
+    }
+
+    private void sendViaResend(String to, String subject, String text) throws IOException, InterruptedException {
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(40))
+                .build();
+
+        String payload = "{"
+                + "\"from\":\"" + escapeJson(senderEmail) + "\","
+                + "\"to\":[\"" + escapeJson(to) + "\"],"
+                + "\"subject\":\"" + escapeJson(subject) + "\","
+                + "\"text\":\"" + escapeJson(text) + "\""
+                + "}";
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.resend.com/emails"))
+                .timeout(Duration.ofSeconds(40))
+                .header("Authorization", "Bearer " + resendApiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload))
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new RuntimeException("Resend API error " + response.statusCode() + ": " + response.body());
+        }
+    }
+
+    private String escapeJson(String input) {
+        if (input == null) return "";
+        return input
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r");
     }
 
     private String findRootCauseMessage(Throwable throwable) {
