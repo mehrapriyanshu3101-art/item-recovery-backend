@@ -30,6 +30,10 @@ public class UserController {
     @Value("${MAIL_FROM:}")
     private String senderEmail;
 
+    // Demo override: if set, every recovery email is sent to this address only.
+    @Value("${DEMO_RECIPIENT_EMAIL:}")
+    private String demoRecipientEmail;
+
     /**
      * 1. REGISTRATION (Used by Android App)
      * Creates a user and returns a unique 8-character token for the QR code.
@@ -87,7 +91,11 @@ public class UserController {
                                 "\"" + finderMessage + "\"\n\n" +
                                 "Please reply to this message if the finder included their contact info.";
 
-                sendViaResend(owner.getEmail(), "Item Found! A message from the finder", mailText);
+                String recipientEmail = (demoRecipientEmail != null && !demoRecipientEmail.isBlank())
+                        ? demoRecipientEmail.trim()
+                        : owner.getEmail();
+
+                sendViaResend(recipientEmail, "Item Found! A message from the finder", mailText);
                 return ResponseEntity.ok("Email sent successfully to " + owner.getName());
 
             } catch (Exception e) {
@@ -103,8 +111,14 @@ public class UserController {
         if (rootMessage.contains("401") || rootMessage.contains("unauthorized")) {
             return "Resend authentication failed. RESEND_API_KEY is invalid or revoked.";
         }
-        if (rootMessage.contains("403") || rootMessage.contains("forbidden")) {
+        if (rootMessage.contains("you can only send testing emails to your own email")) {
+            return "Resend test-mode restriction: onboarding@resend.dev can send only to your own Resend account email. Try with your own email as recipient, or verify a custom domain.";
+        }
+        if (rootMessage.contains("verify a domain")) {
             return "Resend rejected sender. MAIL_FROM must be a verified sender/domain in Resend.";
+        }
+        if (rootMessage.contains("403") || rootMessage.contains("forbidden")) {
+            return "Resend rejected the request (403). Check sender domain and test-mode recipient restrictions.";
         }
         if (rootMessage.contains("422")) {
             return "Resend validation failed. Check recipient email and MAIL_FROM format.";
@@ -137,8 +151,25 @@ public class UserController {
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new RuntimeException("Resend API error " + response.statusCode() + ": " + response.body());
+            throw new RuntimeException("Resend API error " + response.statusCode() + ": " + extractResendMessage(response.body()));
         }
+    }
+
+    private String extractResendMessage(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return "empty error body";
+        }
+        String marker = "\"message\":\"";
+        int start = responseBody.indexOf(marker);
+        if (start < 0) {
+            return sanitize(responseBody);
+        }
+        start += marker.length();
+        int end = responseBody.indexOf("\"", start);
+        if (end < 0) {
+            return sanitize(responseBody);
+        }
+        return sanitize(responseBody.substring(start, end).replace("\\n", " "));
     }
 
     private String escapeJson(String input) {
