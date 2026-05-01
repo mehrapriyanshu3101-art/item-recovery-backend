@@ -78,7 +78,6 @@
         .success-text  { color: #2ecc71; }
         .error-text    { color: #e74c3c; }
 
-        /* Timeout warning banner */
         .warning-banner {
             display: none;
             margin-top: 12px;
@@ -108,21 +107,19 @@
 
         <label for="finder-msg">Where is the item?</label>
         <textarea id="finder-msg" rows="4"
-            placeholder="e.g., I found your wallet at the library near the coffee shop. I've left it with the security guard.">
+                  placeholder="e.g., I found your wallet at the library near the coffee shop. I've left it with the security guard.">
         </textarea>
 
         <button id="send-btn" class="btn">Send Secure Message</button>
 
-        <!-- Shown after ~8 seconds if still waiting -->
         <div id="warning-banner" class="warning-banner">
-            ⏳ The server is waking up from sleep (this can take up to 60 seconds on the free tier).
-            Please wait or try again shortly.
+            Request is taking longer than expected.
+            The backend or email service may be cold-starting. Please wait or try again shortly.
         </div>
     </div>
 </div>
 
 <script>
-    // ── Configuration ────────────────────────────────────────────────────────
     const urlParams = new URLSearchParams(window.location.search);
     const queryToken = (
         urlParams.get('id') ||
@@ -133,38 +130,50 @@
         ""
     ).trim();
 
-    // Supports QR links like:
-    // - /?id=abc12345
-    // - /?token=abc12345
-    // - /abc12345
     const pathParts = window.location.pathname.split('/').filter(Boolean);
     const pathToken = pathParts.length > 0 ? pathParts[pathParts.length - 1] : "";
     const rawToken = queryToken || (pathToken !== "index.html" ? pathToken : "");
     const token = decodeURIComponent(rawToken).trim();
 
-    // Prefer same-origin API so this works across preview/prod URLs.
     const API_BASE  = `${window.location.origin}/api/users/`;
 
-    const statusEl    = document.getElementById('status-area');
-    const mainUi      = document.getElementById('main-ui');
-    const ownerBox    = document.getElementById('owner-box');
-    const nameEl      = document.getElementById('owner-name');
-    const sendBtn     = document.getElementById('send-btn');
-    const msgInput    = document.getElementById('finder-msg');
-    const warnBanner  = document.getElementById('warning-banner');
+    const statusEl = document.getElementById('status-area');
+    const mainUi = document.getElementById('main-ui');
+    const ownerBox = document.getElementById('owner-box');
+    const nameEl = document.getElementById('owner-name');
+    const sendBtn = document.getElementById('send-btn');
+    const msgInput = document.getElementById('finder-msg');
+    const warnBanner = document.getElementById('warning-banner');
 
-    // ── Helper: fetch with timeout ───────────────────────────────────────────
+    // Some environments can keep fetch pending during cold-start/network stalls.
+    // We use both AbortController and a hard timeout rejection so UI never hangs.
     function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
-        const controller  = new AbortController();
-        const timeoutId   = setTimeout(() => controller.abort(), timeoutMs);
-        return fetch(url, { ...options, signal: controller.signal })
-            .finally(() => clearTimeout(timeoutId));
+        const controller = new AbortController();
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+                controller.abort();
+                const timeoutError = new Error('RequestTimeout');
+                timeoutError.name = 'TimeoutError';
+                reject(timeoutError);
+            }, timeoutMs);
+        });
+
+        const fetchPromise = fetch(url, { ...options, signal: controller.signal })
+            .catch(err => {
+                if (err && err.name === 'AbortError') {
+                    const timeoutError = new Error('RequestTimeout');
+                    timeoutError.name = 'TimeoutError';
+                    throw timeoutError;
+                }
+                throw err;
+            });
+
+        return Promise.race([fetchPromise, timeoutPromise]);
     }
 
-    // ── Step 1: Verify token on page load ────────────────────────────────────
     if (!token) {
-        statusEl.innerText    = "Error: Invalid QR Code (No token found).";
-        statusEl.className    = "error-text";
+        statusEl.innerText = "Error: Invalid QR Code (No token found).";
+        statusEl.className = "error-text";
     } else {
         fetchWithTimeout(`${API_BASE}find/${token}`, {}, 20000)
             .then(res => {
@@ -172,22 +181,21 @@
                 return res.json();
             })
             .then(user => {
-                statusEl.style.display  = 'none';
-                mainUi.style.display    = 'block';
-                ownerBox.style.display  = 'block';
-                nameEl.innerText        = user.name;
+                statusEl.style.display = 'none';
+                mainUi.style.display = 'block';
+                ownerBox.style.display = 'block';
+                nameEl.innerText = user.name;
             })
             .catch(err => {
-                if (err.name === 'AbortError') {
-                    statusEl.innerText  = "Server is taking too long to respond. It may be waking up — please refresh the page in 30 seconds.";
+                if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+                    statusEl.innerText = "Server response is delayed. It may be cold-starting - please refresh the page in 30 seconds.";
                 } else {
-                    statusEl.innerText  = "Error: This recovery tag is not registered.";
+                    statusEl.innerText = "Error: This recovery tag is not registered.";
                 }
                 statusEl.className = "error-text";
             });
     }
 
-    // ── Step 2: Send email on button click ───────────────────────────────────
     sendBtn.onclick = async function () {
         const message = msgInput.value.trim();
         if (!message) {
@@ -195,23 +203,21 @@
             return;
         }
 
-        sendBtn.disabled    = true;
-        sendBtn.innerText   = "Sending Message...";
+        sendBtn.disabled = true;
+        sendBtn.innerText = "Sending Message...";
         warnBanner.style.display = 'none';
 
-        // Show "server waking up" banner after 8 seconds if still waiting
         const warnTimer = setTimeout(() => {
             warnBanner.style.display = 'block';
         }, 8000);
 
         try {
-            // 60-second timeout — enough for Render cold-start
             const res = await fetchWithTimeout(
                 `${API_BASE}send-email`,
                 {
-                    method:  "POST",
+                    method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body:    JSON.stringify({ id: token, message: message })
+                    body: JSON.stringify({ id: token, message: message })
                 },
                 60000
             );
@@ -222,7 +228,7 @@
             if (res.ok) {
                 mainUi.innerHTML = `
                     <div class="success-text" style="font-size:1.2rem; margin-top:20px;">
-                        ✔ Message Sent Successfully!
+                        Message Sent Successfully!
                     </div>
                     <p style="margin-top:15px;">
                         The owner has been notified via their registered email.
@@ -231,7 +237,7 @@
             } else {
                 const errText = await res.text();
                 alert("Server error: " + errText);
-                sendBtn.disabled  = false;
+                sendBtn.disabled = false;
                 sendBtn.innerText = "Send Secure Message";
             }
 
@@ -239,12 +245,12 @@
             clearTimeout(warnTimer);
             warnBanner.style.display = 'none';
 
-            if (err.name === 'AbortError') {
-                alert("Request timed out. The server is still waking up — please try again in 30 seconds.");
+            if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+                alert("Request timed out. Server or email service did not respond in time. Please try again in 30 seconds.");
             } else {
                 alert("Could not send the message. Please check your connection and try again.");
             }
-            sendBtn.disabled  = false;
+            sendBtn.disabled = false;
             sendBtn.innerText = "Send Secure Message";
         }
     };
