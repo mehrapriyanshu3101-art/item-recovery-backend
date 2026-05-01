@@ -57,8 +57,17 @@ public class UserController {
     public ResponseEntity<String> sendRecoveryEmail(@RequestBody Map<String, String> payload) {
         String token         = payload.get("id");
         String finderMessage = payload.get("message");
+        if (token == null || token.isBlank()) {
+            return ResponseEntity.badRequest().body("Missing token in request.");
+        }
+        if (finderMessage == null || finderMessage.isBlank()) {
+            return ResponseEntity.badRequest().body("Message cannot be empty.");
+        }
 
         return userRepository.findByUniqueToken(token).map(owner -> {
+            if (owner.getEmail() == null || owner.getEmail().isBlank()) {
+                return ResponseEntity.status(500).body("Owner email is not configured.");
+            }
             try {
                 SimpleMailMessage email = new SimpleMailMessage();
                 email.setFrom(senderEmail);          // required by Gmail SMTP
@@ -76,7 +85,7 @@ public class UserController {
 
             } catch (Exception e) {
                 return ResponseEntity.status(500)
-                        .body("Error sending email: " + e.getMessage());
+                        .body("Error sending email. Check MAIL_USERNAME / MAIL_PASSWORD and Gmail SMTP access in server settings.");
             }
         }).orElse(ResponseEntity.status(404).body("Token not recognized."));
     }
